@@ -139,7 +139,7 @@ class ProgressAndHistoryView(Gtk.Stack):
         self.update_view()
 
         if self.next_notification.enabled:
-            if final_msg['type'] == 'clone':
+            if final_msg['type'] == 'clone' or final_msg['type'] == 'restore':  #? why this check?
                 # success
                 self.next_notification.successes += 1
             else:

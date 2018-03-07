@@ -42,10 +42,12 @@ def extract_compression_option(path: str) -> str:
     'zst'
     """
     m = re.fullmatch(name_re, path)
-    z_option = m.group(3)
-    if z_option == 'zstd':  # fix v0.14 extension
-        z_option = 'zst'
-    return z_option
+    if m:
+        z_option = m.group(3)
+        if z_option == 'zstd':  # fix v0.14 extension
+            z_option = 'zst'
+        return z_option
+    return ""
 
 
 def rm_dev(source: str) -> str:

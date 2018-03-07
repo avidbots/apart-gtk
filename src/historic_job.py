@@ -8,6 +8,7 @@ from partinfo import key_and_val
 import settings
 from util import *
 from typing import *
+import os.path
 
 FINISHED_JOB_COLUMNS = 3
 FORGET_TEXT = 'Clear'
@@ -156,51 +157,90 @@ class FinishedJob:
 
         self.finish_label.set_text(finished_str)
 
+        compression_check = True
+        if self.msg['type'] == "clone":
+            compression_check = self.compression_available
+
         self.rerun_btn.set_sensitive(self.source_available == SourceAvailability.AVAILABLE
-                                     and self.compression_available)
+                                     and compression_check)
         tooltip = RERUN_TIP
+        """
+        Set appropriate source/destination depending on whether
+        it is a clone or restore job.
+        """
+        part=""
+        if self.msg['type'] == "clone":
+            part = self.msg['source']
+        elif self.msg['type'] == "restore":
+            part = self.msg['destination']
+
         if self.source_available == SourceAvailability.MOUNTED:
-            tooltip = rm_dev(self.msg['source']) + " is currently mounted"
+            tooltip = rm_dev(part) + " is currently mounted"
         elif self.source_available == SourceAvailability.GONE:
-            tooltip = rm_dev(self.msg['source']) + " is not currently available"
+            tooltip = rm_dev(part) + " is not currently available"
         elif self.source_available == SourceAvailability.UUID_MISMATCH:
             tooltip = 'current {} does not match cloned partition uuid'\
-                .format(rm_dev(self.msg['source']))
-        elif not self.compression_available:
+                .format(rm_dev(part))
+        elif not self.compression_available and self.msg['type'] == "clone":
             tooltip = extract_compression_option(self.msg['destination']) + \
                       ' compression is not installed'
+
+        """.
+        For restore jobs, check source file still exists
+        """
+        if self.msg['type'] == "restore":
+            if not os.path.isfile(self.msg['source']):
+                tooltip = "Source file no longer available"
+
+        
         self.rerun_btn.set_tooltip_text(tooltip)
 
     def forget(self, button=None):
         self.progress_view.forget(self)
 
     def rerun(self, button=None):
-        backup_dir = extract_directory(self.msg['destination'])
-        backup_name = extract_name(self.msg['destination'])
-        z_name = extract_compression_option(self.msg['destination'])
-        self.core.send('type: clone\n'
-                       'source: {}\n'
-                       'destination: {}\n'
-                       'name: {}\n'
-                       'compression: {}'.format(self.msg['source'],
-                                                backup_dir,
-                                                backup_name,
-                                                z_name))
-        if self.forget_on_rerun:
-            self.forget()
+        type_ = self.msg['type']
+        if type_ == "clone":
+            backup_dir = extract_directory(self.msg['destination'])
+            backup_name = extract_name(self.msg['destination'])
+            z_name = extract_compression_option(self.msg['destination'])
+            self.core.send('type: clone\n'
+                           'source: {}\n'
+                           'destination: {}\n'
+                           'name: {}\n'
+                           'compression: {}'.format(self.msg['source'],
+                                                    backup_dir,
+                                                    backup_name,
+                                                    z_name))
+        
+            if self.forget_on_rerun:
+                self.forget()
+
+        elif type_ == "restore":
+            image_file = self.msg['source']
+            dev_name = self.msg['destination']            
+            yaml_template = 'type: restore\nsource: {source}\ndestination: {destination}'
+            self.core.send(yaml_template.format(source=image_file,
+                                                destination=dev_name))
+            
 
     def add_to_grid(self, grid: Gtk.Grid):
         raise Exception('abstract')
 
     def on_source_update(self, sources: Dict):
-        source_part_name = rm_dev(self.msg['source'])
-        source_uuid = self.msg.get('source_uuid')
+        type_ = self.msg['type']
+        # For restore jobs, check destination instead of source
+        if type_ == "restore":
+            part_name = rm_dev(self.msg['destination'])
+        else:
+            part_name = rm_dev(self.msg['source'])
+            source_uuid = self.msg.get('source_uuid')
         for disk in sources:
             for part in disk['parts']:
-                if part['name'] == source_part_name:
+                if part['name'] == part_name:
                     if part['mounted']:
                         self.source_available = SourceAvailability.MOUNTED
-                    elif source_uuid and part.get('uuid') != source_uuid:
+                    elif type_ == "clone" and source_uuid and part.get('uuid') != source_uuid:
                         self.source_available = SourceAvailability.UUID_MISMATCH
                     else:
                         self.source_available = SourceAvailability.AVAILABLE
@@ -381,6 +421,8 @@ class FailedRestore(FinishedJob):
         tenant.attach(self.buttons, top=base, left=2)
         tenant.attach(self.extra, top=base+1, width=FINISHED_JOB_COLUMNS)
 
+        grid.get_toplevel().register_interest_in_sources(on_update_callback=self.on_source_update)
+
     def purpose(self) -> str:
         """Note: used for similarity"""
         return 'Restore {}'.format(rm_dev(self.msg['destination']))
@@ -392,6 +434,7 @@ class SuccessfulRestore(FinishedJob):
                  progress_view: 'ProgressAndHistoryView',
                  core: ApartCore,
                  z_options: List[str]):
+        print("SUCCESFUL RESTORE")
         FinishedJob.__init__(self, final_message,
                              progress_view,
                              core,
@@ -408,7 +451,7 @@ class SuccessfulRestore(FinishedJob):
         self.extra.add(self.stats)
         # naive rerun is unsafe for restore jobs as /dev/abc1 may refer to different partition
         # than when last run
-        self.rerun_btn.destroy()
+        #self.rerun_btn.destroy()
 
     def add_to_grid(self, grid: Gtk.Grid):
         if self.tenant:
@@ -422,6 +465,8 @@ class SuccessfulRestore(FinishedJob):
         tenant.attach(self.finish_box, top=base, left=1)
         tenant.attach(self.buttons, top=base, left=2)
         tenant.attach(self.extra, top=base + 1, width=FINISHED_JOB_COLUMNS)
+
+        grid.get_toplevel().register_interest_in_sources(on_update_callback=self.on_source_update)
 
     def purpose(self) -> str:
         """Note: used for similarity"""
