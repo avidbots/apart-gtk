@@ -4,9 +4,6 @@
 .new-clone-options .dim-label {
   margin: 6px 6px 6px 0;
 }
-.new-clone-options filechooserbutton {
-  min-width: 300px;
-}
 .new-clone-buttons button:last-child {
   margin-left: 6px;
 }
